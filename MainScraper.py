@@ -5,7 +5,6 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import NoSuchElementException
 from webdriver_manager.chrome import ChromeDriverManager
 from parsel import Selector
-import re
 import time
 import sys
 from PlacesVisualiser import *
@@ -44,7 +43,7 @@ def scrollDownLeftMenuOnGoogleMaps(counter, waitingTime):
     :param counter: number of scrolls down
     :param waitingTime: waiting time until next scroll (new results are loaded)
     """
-    menu_xpath = '/html/body/div[3]/div[9]/div[9]/div/div/div[1]/div[2]/div/div[1]/div/div/div[2]/div[1]/div[3]/div'
+    menu_xpath = 'id("QA0Szd")/DIV[1]/DIV[1]/DIV[1]/DIV[2]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[1]'
     if check_exists_by_xpath(menu_xpath):
         for i in range(counter):
             # wait until element is located
@@ -54,6 +53,8 @@ def scrollDownLeftMenuOnGoogleMaps(counter, waitingTime):
             # perform scrolling down
             scroll_origin = ScrollOrigin.from_element(menu_left)
             ActionChains(driver).scroll_from_origin(scroll_origin, 0, 500).perform()
+            
+            # add a small delay between each scroll action
 
 
 def searchForPlace(url, typeOfPlace):
@@ -72,21 +73,45 @@ def searchForPlace(url, typeOfPlace):
     if not googleAcceptButtonClicked:
         clickAcceptAllButton()
 
-    # scroll down left menu
-    scrollDownLeftMenuOnGoogleMaps(counter=3, waitingTime=2)
-
     # get the source code of the page
     page_content = driver.page_source
     response = Selector(page_content)
 
-    placesResults = []
-    # save the search results into a dictionary
-    for el in response.xpath('//div[contains(@aria-label, "Results for")]/div/div[./a]'):
-        placesResults.append({
-            'link': el.xpath('./a/@href').extract_first(''),
-            'title': el.xpath('./a/@aria-label').extract_first(''),
-            'type': typeOfPlace
-        })
+    # scroll down left menu
+    while True:
+        page_content = driver.page_source
+        response = Selector(page_content)
+        placesResults = []
+        # save the search results into a dictionary
+        for el in response.xpath('//div[contains(@aria-label, "Résultats")]/div/div[./a]'):
+            link = el.xpath('./a/@href').extract_first('')
+            title = el.xpath('./a/@aria-label').extract_first('')
+
+            
+            # Browse to the link and search for the div with the phone number button
+            if link:
+                driver.get(link)
+                phone_div = driver.find_element(By.XPATH, 'id("QA0Szd")/DIV[1]/DIV[1]/DIV[1]/DIV[2]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[7]/DIV[5]/BUTTON[contains(@aria-label, "Numéro de téléphone:")]')
+                phone_number = phone_div.get_attribute('aria-label')
+                phone_number = ''.join(filter(str.isdigit, phone_number))  # Extract only digits from phone_number
+                print(f'{title}: {phone_number}')
+                placesResults[-1]['phone_number'] = phone_number
+            
+            # add all information about the place to the dictionary
+            placesResults.append({
+                'link': link,
+                'title': title,
+                'type': typeOfPlace,
+                'phone_number': phone_number  
+            })
+        
+        scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=0)
+        if check_exists_by_xpath('//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")]'):
+            scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=15)
+            time.sleep(1)
+            break
+
+
 
     return placesResults
 
@@ -97,10 +122,10 @@ def clickAcceptAllButton():
     the webdriver.
     """
     global googleAcceptButtonClicked
-    button_path = '//*[@id="yDmH0d"]/c-wiz/div/div/div/div[2]/div[1]/div[3]/div[1]/div[1]/form[2]/div/div/button'
-    wait = WebDriverWait(driver, 1)
-    button = wait.until(EC.visibility_of_element_located((By.XPATH, button_path)))
-    button.click()
+    #button_path = '//*[@id="yDmH0d"]/c-wiz/div/div/div/div[2]/div[1]/div[3]/div[1]/div[1]/form[2]/div/div/button'
+    #wait = WebDriverWait(driver, 10)
+    #button = wait.until(EC.visibility_of_element_located((By.XPATH, button_path)))
+    #button.click()
     googleAcceptButtonClicked = True
 
 
@@ -109,22 +134,11 @@ def addLonLatToDataFrame(df):
     This function adds columns "lat" (latitude) and "lon" (longitude) to dataframe containing list of found places.
 
     :param df: dataframe containing list of found places
-    :return: dataframe contatining list of found places and each place has assigned latitude and longitude
+    :return: dataframe containing list of found places and each place has assigned latitude and longitude
     """
-    lat = []
-    lon = []
-    for index, row in df.iterrows():
-        link = df.at[index, 'link']
-        # print(link, "\n")
-        latLon = re.search('!3d(.*)!16', link).group(1).split('!4d')
-        # print(latLon[0], latLon[0])
-        lat.append(latLon[0])
-        lon.append(latLon[1])
-
-    df['lat'] = lat
-    df['lon'] = lon
-
-    df = df[['lat', 'lon', 'type', 'title', 'link']]  # set order of columns
+    if 'link' in df.columns:
+        df[['lat', 'lon']] = df['link'].str.extract(r'!3d(.*?)!16.*!4d(.*?)!', expand=True)
+        df = df[['lat', 'lon', 'type', 'title','link']]  # set order of columns
 
     return df
 
@@ -144,7 +158,7 @@ def generateUrls(typeOfPlace):
     :return: list of generated URLs containing type of place, searched location, and zoom of searching
     """
     pointsDirectory = "generatedPoints/"
-    points_df = pd.read_csv(pointsDirectory + "Points_size_15r_15c_optimized.csv", index_col=False)
+    points_df = pd.read_csv(pointsDirectory + "measure_points_3r_3c.csv", index_col=False)
 
     base = 'https://www.google.com/maps/search/'
 
@@ -169,7 +183,7 @@ if __name__ == "__main__":
     types_of_places = sys.argv[1:]
 
     if len(types_of_places) == 0:
-        types_of_places = ['bar', 'cinema', 'office']  # set the types of searched places
+        types_of_places = ['spa']  # set the types of searched places
 
     print(types_of_places)
     for typeOfPlace in types_of_places:
@@ -182,18 +196,30 @@ if __name__ == "__main__":
         progressCounter = 0
         for url in urls:
             new_places = searchForPlace(url, typeOfPlace)
+            if not new_places:
+                print(f"No places returned from searchForPlace for url: {url}")
             list_of_places += new_places  # concat two lists
             progressCounter += 1
             print("progress: " + str(round(100 * progressCounter / len(urls), 2)) + "%")
 
-        df = pd.DataFrame(list_of_places)
+        if not list_of_places:
+            print("No places found for typeOfPlace: " + typeOfPlace)
+        else:
+            df = pd.DataFrame(list_of_places)
 
-        df = df.drop_duplicates()
-        df = addLonLatToDataFrame(df)
+            df_before_drop = df.copy()
+            df = df.drop_duplicates()
+            if df_before_drop.shape[0] > df.shape[0]:
+                print("Duplicates were dropped from the DataFrame")
 
-        print("number of places:" + str(df.shape[0]))
+            df_before_lonlat = df.copy()
+            df = addLonLatToDataFrame(df)
+            if df_before_lonlat.shape[0] > df.shape[0]:
+                print("Rows were removed in addLonLatToDataFrame")
 
-        df.to_csv('database/' + typeOfPlace + '_v1.csv', index=False)
+            print("number of places:" + str(df.shape[0]))
+
+            df.to_csv('database/' + typeOfPlace + '_v1.csv', index=False)
 
     closeDriver()
 

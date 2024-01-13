@@ -29,7 +29,7 @@ def setPlaces(points):
     :param points: DataFrame containing information about the points to visualise.
     :return: figure of type scatter_mapbox (from plotly.express library)
     """
-    points['size'] = 1000
+    points['size'] = 4000
     points['color'] = 1
 
     color_scale = [(0, 'green'), (1, 'red')]
@@ -93,8 +93,14 @@ def visualiseMeasurePoints(pointsDirectory, numberOfRows, numberOfColumns):
 if __name__ == "__main__":
     pointsDirectory = 'generatedPoints/'
     # number of "steps" (resolution of the division of the area --> greater value gives more details)
-    numberOfColumns = 15
+    numberOfColumns = 3
     numberOfRows = 3
 
-    #visualiseCollectedPoints()
-    visualiseMeasurePoints(pointsDirectory, numberOfRows, numberOfColumns)
+    # Check if the file exists
+    file_path = pointsDirectory + "measure_points_" + str(numberOfRows) + 'r_' + str(numberOfColumns) + 'c'+ ".csv"
+    if not os.path.isfile(file_path):
+        print(f"File '{file_path}' does not exist.")
+        # Handle the missing file scenario here
+
+    else:
+        visualiseMeasurePoints(pointsDirectory, numberOfRows, numberOfColumns)
