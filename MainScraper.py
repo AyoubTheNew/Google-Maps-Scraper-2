@@ -78,32 +78,47 @@ def searchForPlace(url, typeOfPlace):
     response = Selector(page_content)
 
     # scroll down left menu
+    placesResults = []
+    titles = set()  # Create a set to store unique titles
+
     while True:
         page_content = driver.page_source
         response = Selector(page_content)
-        placesResults = []
+
+
         # save the search results into a dictionary
         for el in response.xpath('//div[contains(@aria-label, "Résultats")]/div/div[./a]'):
             link = el.xpath('./a/@href').extract_first('')
             title = el.xpath('./a/@aria-label').extract_first('')
 
-            
-            # Browse to the link and search for the div with the phone number button
-            if link:
-                driver.get(link)
-                phone_div = driver.find_element(By.XPATH, 'id("QA0Szd")/DIV[1]/DIV[1]/DIV[1]/DIV[2]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[7]/DIV[5]/BUTTON[contains(@aria-label, "Numéro de téléphone:")]')
+            # Check if the title already exists in titles set
+            if title in titles:
+                continue
+
+            titles.add(title)  # Add the title to the set of seen titles
+
+            # Open the link in a new tab
+            driver.execute_script("window.open(arguments[0], '_blank');", link)
+            # Switch to the new tab
+            driver.switch_to.window(driver.window_handles[-1])
+            try:
+                phone_div = driver.find_element(By.XPATH, 'id("QA0Szd")//div/BUTTON[contains(@aria-label, "Numéro de téléphone:")]')
                 phone_number = phone_div.get_attribute('aria-label')
                 phone_number = ''.join(filter(str.isdigit, phone_number))  # Extract only digits from phone_number
                 print(f'{title}: {phone_number}')
-                placesResults[-1]['phone_number'] = phone_number
-            
+            except NoSuchElementException:
+                continue
+            # Close the tab
+            driver.close()
+            # Switch back to the original tab
+            driver.switch_to.window(driver.window_handles[0])
+
             # add all information about the place to the dictionary
             placesResults.append({
                 'link': link,
                 'title': title,
-                'type': typeOfPlace,
-                'phone_number': phone_number  
-            })
+                'phone_number': phone_number})
+
         
         scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=0)
         if check_exists_by_xpath('//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")]'):
