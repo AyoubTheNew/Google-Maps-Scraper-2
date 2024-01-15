@@ -18,7 +18,7 @@ options = webdriver.ChromeOptions()
 options.add_argument('headless')  # Make browser open in background
 # driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
 driver = webdriver.Chrome(ChromeDriverManager().install())
-
+driver.maximize_window()
 
 def check_exists_by_xpath(xpath):
     """
@@ -45,18 +45,30 @@ def scrollDownLeftMenuOnGoogleMaps(counter, waitingTime):
     """
     menu_xpath = 'id("QA0Szd")/DIV[1]/DIV[1]/DIV[1]/DIV[2]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[1]/DIV[1]'
     if check_exists_by_xpath(menu_xpath):
+        total_length = 0
         for i in range(counter):
             # wait until element is located
             wait = WebDriverWait(driver, waitingTime)
             menu_left = wait.until(EC.visibility_of_element_located((By.XPATH, menu_xpath)))
 
+            # get the initial length of the menu
+            initial_length = len(menu_left.text)
+
             # perform scrolling down
             scroll_origin = ScrollOrigin.from_element(menu_left)
-            ActionChains(driver).scroll_from_origin(scroll_origin, 0, 500).perform()
+            ActionChains(driver).scroll_from_origin(scroll_origin, 0, 150).perform()
+
+            # wait for the menu to load new results
+            time.sleep(waitingTime)
+
+            # get the new length of the menu
+            new_length = len(menu_left.text)
+
+            # calculate the length difference
+            length_difference = new_length - initial_length
+            total_length += length_difference
+            print(f"Length difference after scroll {i+1}: {total_length}")
             
-            # add a small delay between each scroll action
-
-
 def searchForPlace(url, typeOfPlace):
     """
     This function is responsible for searching a place of specific type at specific location with set zoom.
@@ -68,39 +80,36 @@ def searchForPlace(url, typeOfPlace):
     """
     global googleAcceptButtonClicked
     driver.get(url)
-
+    
     # only at the first page click the "accept all" ("zaakceptuj wszystko") button
     if not googleAcceptButtonClicked:
         clickAcceptAllButton()
-
     # get the source code of the page
     page_content = driver.page_source
     response = Selector(page_content)
-
     # scroll down left menu
     placesResults = []
     titles = set()  # Create a set to store unique titles
-
     while True:
         page_content = driver.page_source
         response = Selector(page_content)
-
-
         # save the search results into a dictionary
-        for el in response.xpath('//div[contains(@aria-label, "Résultats")]/div/div[./a]'):
+        for idx, el in enumerate(response.xpath('//div[contains(@aria-label, "Résultats")]/div/div[./a]')):
             link = el.xpath('./a/@href').extract_first('')
             title = el.xpath('./a/@aria-label').extract_first('')
-
-            # Check if the title already exists in titles set
             if title in titles:
                 continue
-
-            titles.add(title)  # Add the title to the set of seen titles
-
-            # Open the link in a new tab
-            driver.execute_script("window.open(arguments[0], '_blank');", link)
-            # Switch to the new tab
-            driver.switch_to.window(driver.window_handles[-1])
+            titles.add(title)
+            # Find the elements right before you interact with them
+            elements = driver.find_elements(By.XPATH,'//div[contains(@aria-label, "Résultats")]/div/div[./a]')
+            wait = WebDriverWait(driver, 10) 
+            if idx == 0:
+                elements[idx].click()
+                time.sleep(5)  # Wait for 5 seconds if it's the first element
+            else:
+                elements[idx].click()
+                time.sleep(1) 
+            # Get the phone number
             try:
                 phone_div = driver.find_element(By.XPATH, 'id("QA0Szd")//div/BUTTON[contains(@aria-label, "Numéro de téléphone:")]')
                 phone_number = phone_div.get_attribute('aria-label')
@@ -108,27 +117,27 @@ def searchForPlace(url, typeOfPlace):
                 print(f'{title}: {phone_number}')
             except NoSuchElementException:
                 continue
-            # Close the tab
-            driver.close()
-            # Switch back to the original tab
-            driver.switch_to.window(driver.window_handles[0])
-
             # add all information about the place to the dictionary
             placesResults.append({
                 'link': link,
                 'title': title,
+                'type': typeOfPlace,
                 'phone_number': phone_number})
-
-        
+            # Check if there is a next element
+            if idx < len(elements) - 1:  
+                driver.execute_script("arguments[0].scrollIntoView();", elements[idx+1])
+            close_button = driver.find_element(By.CSS_SELECTOR, 'button.VfPpkd-icon-LgbsSe')
+            close_button.click()
+            WebDriverWait(driver, 10).until(EC.staleness_of(close_button))
+            
         scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=0)
-        if check_exists_by_xpath('//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")]'):
-            scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=15)
-            time.sleep(1)
-            break
-
-
-
+        if check_exists_by_xpath('//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")][last()]'):
+            if check_exists_by_xpath('//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")][last()]'):
+                scrollDownLeftMenuOnGoogleMaps(counter=1, waitingTime=15)
+                WebDriverWait(driver, 1).until(EC.presence_of_element_located((By.XPATH, '//span[contains(text(), "Vous êtes arrivé à la fin de la liste.")][last()]')))
+                break
     return placesResults
+
 
 
 def clickAcceptAllButton():
@@ -198,7 +207,7 @@ if __name__ == "__main__":
     types_of_places = sys.argv[1:]
 
     if len(types_of_places) == 0:
-        types_of_places = ['spa']  # set the types of searched places
+        types_of_places = ['cenima']  # set the types of searched places
 
     print(types_of_places)
     for typeOfPlace in types_of_places:
